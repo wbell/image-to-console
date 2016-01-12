@@ -1,0 +1,53 @@
+{
+  "name": "image-to-console",
+  "version": "0.0.0",
+  "description": "Print images and animations on your terminal.",
+  "main": "index.js",
+  "bin": {
+    "itc": "./src/cli.js"
+  },
+  "engines": {
+    "node": ">=0.12.3"
+  },
+  "dependencies": {
+    "ascii-images": "^0.1.1",
+    "chalk": "^1.1.1",
+    "commander": "^2.9.0",
+    "elegant-spinner": "^1.0.1",
+    "gif-explode": "0.0.1",
+    "jimp": "^0.2.21",
+    "lodash": "^3.10.1",
+    "log-update": "^1.0.2",
+    "mkdirp": "^0.5.1",
+    "q": "^1.4.1",
+    "request": "^2.67.0",
+    "rimraf": "^2.5.0"
+  },
+  "devDependencies": {
+    "code": "^2.1.0",
+    "lab": "^8.0.1",
+    "sinon": "^1.17.2"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wbell/image-to-console.git"
+  },
+  "keywords": [
+    "image",
+    "animation",
+    "gif",
+    "cli",
+    "console",
+    "terminal",
+    "shell"
+  ],
+  "author": "Willie Bell",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/wbell/image-to-console/issues"
+  },
+  "homepage": "https://github.com/wbell/image-to-console#readme"
+}

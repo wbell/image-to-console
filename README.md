@@ -1,2 +1,2 @@
 # image-to-console
-Print images on your terminal.
+Print images and animations on your terminal.
