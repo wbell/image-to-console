@@ -14,12 +14,12 @@
     "chalk": "^1.1.1",
     "commander": "^2.9.0",
     "elegant-spinner": "^1.0.1",
-    "gif-explode": "0.0.1",
     "jimp": "^0.2.21",
     "lodash": "^3.10.1",
     "log-update": "^1.0.2",
     "mkdirp": "^0.5.1",
     "q": "^1.4.1",
+    "readimage": "^1.1.1",
     "request": "^2.67.0",
     "rimraf": "^2.5.0"
   },
