@@ -6,6 +6,7 @@ var request = require('request');
 var fs = require('fs');
 var path = require('path');
 var mkdirp = require('mkdirp');
+var rimraf = require('rimraf');
 var Logger = require('./logger');
 var log = null;
 var q = require('q');
@@ -23,7 +24,7 @@ var logUpdate = require('log-update');
  */
 function ImageToConsole(imgPaths, options, debug) {
   if (!(this instanceof ImageToConsole)) {
-    return new ImageToConsole(imgPaths, options);
+    return new ImageToConsole(imgPaths, options, debug);
   }
 
   // set properties
@@ -31,8 +32,9 @@ function ImageToConsole(imgPaths, options, debug) {
   this.options = _.extend({}, defaults, options);
   this.queue = [];
   this.interval = null;
+  this.debug = !!debug;
 
-  if(options.speed){
+  if (options.speed) {
     this.userSetSpeed = true;
   }
 
@@ -46,7 +48,9 @@ function ImageToConsole(imgPaths, options, debug) {
   return this.collectImages()
     .then(this.bufferImages.bind(this))
     .then(this.resizeImages.bind(this))
-    .then(this.generateAscii.bind(this));
+    .then(this.generateAscii.bind(this))
+    .then(this.startAnimation.bind(this))
+    .then(this.cleanUp.bind(this));
 }
 
 /**
@@ -203,8 +207,8 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
     if (frame.delay) {
       log.info('native animation speed is "' + frame.delay + '" for "' + localPath + '"');
 
-      if(!_this.userSetSpeed){
-        log.warn('setting speed to '+ frame.delay);
+      if (!_this.userSetSpeed) {
+        log.warn('setting speed to ' + frame.delay);
         _this.options.speed = frame.delay;
       }
     }
@@ -292,16 +296,25 @@ ImageToConsole.prototype.resizeImages = function(bufferArr) {
         return false;
       }
 
+
       frame
         .resize(_this.options.width, _this.options.height || Jimp.AUTO)
-        .write(resizedPath);
+        .write(resizedPath, function(err) {
+          if (err) {
+            log.error('write error: ' + resizedPath);
+            log.error(err);
+            deferred.reject(err);
+          } else {
+            log.info('successful write: ' + resizedPath);
 
-      resizedPaths[index] = resizedPath;
+            resizedPaths[index] = resizedPath;
 
-      if (_.compact(resizedPaths).length === bufferArr.length) {
-        log.success('all images successfully resized');
-        deferred.resolve(resizedPaths);
-      }
+            if (_.compact(resizedPaths).length === bufferArr.length) {
+              log.success('all images successfully resized');
+              deferred.resolve(resizedPaths);
+            }
+          }
+        });
 
     });
   }
@@ -335,22 +348,68 @@ ImageToConsole.prototype.generateAscii = function GenerateAscii(resizedPaths) {
   return deferred.promise;
 };
 
-ImageToConsole.prototype.startAnimation = function(frames) {
-  log.info('starting animation');
+/**
+ * runs the frame animation, if multiple frames
+ * @param  {Array} frames array of ascii characters
+ * @return {Promise}
+ */
+ImageToConsole.prototype.startAnimation = function StartAnimation(frames) {
+  var deferred = q.defer();
+  var i = 0;
+  var len = frames.length;
 
-  function _getFrame() {
-    var i = 0;
-    var len = frames.length;
+  if (frames.length === 1) {
+    logUpdate(frames[0]);
+    logUpdate.done();
+    deferred.resolve({
+      animating: false
+    });
+    log.info('image drawn');
+  } else {
+    log.info('starting animation');
 
-    return function() {
-      return frames[i = ++i % len];
-    };
+    this.interval = setInterval(function() {
+      logUpdate(_getFrame());
+    }, this.options.speed);
+
+    deferred.resolve({
+      animating: true
+    });
   }
 
-  this.interval = setInterval(function() {
-    logUpdate(_getFrame());
-  }, this.options.speed);
+  function _getFrame() {
+    return frames[i = ++i % len];
+  }
 
+  return deferred.promise;
+};
+
+/**
+ * stops the current running animation
+ * @param  {Boolean} clear if true, clears the image from the console
+ */
+ImageToConsole.prototype.stopAnimation = function StopAnimation(clear) {
+
+  clearInterval(this.interval);
+  this.interval = null;
+
+  if (clear) {
+    logUpdate.clear();
+  } else {
+    logUpdate.done();
+  }
+
+  log.info('animation stopped');
+};
+
+ImageToConsole.prototype.cleanUp = function CleanUp() {
+  rimraf(path.resolve(this.options.temp), function(err) {
+    if (err) {
+      log.error(err);
+    } else {
+      log.success('temp directories cleared');
+    }
+  });
 };
 
 

@@ -13,7 +13,6 @@
     "ascii-images": "^0.1.1",
     "chalk": "^1.1.1",
     "commander": "^2.9.0",
-    "elegant-spinner": "^1.0.1",
     "jimp": "^0.2.21",
     "lodash": "^3.10.1",
     "log-update": "^1.0.2",
@@ -30,7 +29,7 @@
     "sinon": "^1.17.2"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "itc http://rs301.pbsrc.com/albums/nn64/lucsonic/Sonic/supersonic-sonicxpress.gif~c200 -L 2"
   },
   "repository": {
     "type": "git",
