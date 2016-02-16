@@ -9,8 +9,10 @@ var mkdirp = require('mkdirp');
 var Logger = require('./logger');
 var log = null;
 var q = require('q');
-var jimp = require('jimp');
+var Jimp = require('jimp');
+var PNG = require('pngjs2').PNG;
 var readimage = require('readimage');
+var ai = require('ascii-images');
 
 /**
  * ImageToConsole constructor function
@@ -18,7 +20,7 @@ var readimage = require('readimage');
  * @param {Object} options  options map passed to plugin
  * @return {Promise}
  */
-function ImageToConsole(imgPaths, options) {
+function ImageToConsole(imgPaths, options, debug) {
   if (!(this instanceof ImageToConsole)) {
     return new ImageToConsole(imgPaths, options);
   }
@@ -33,9 +35,12 @@ function ImageToConsole(imgPaths, options) {
 
   log.info('ImageToConsole instance constructed');
 
+  if (debug) return this;
+
   return this.collectImages()
-    .then(this.bufferImages)
-    .then(this.resizeImages);
+    .then(this.bufferImages.bind(this))
+    .then(this.resizeImages.bind(this))
+    .then(this.generateAscii.bind(this));
 }
 
 /**
@@ -44,17 +49,16 @@ function ImageToConsole(imgPaths, options) {
  */
 ImageToConsole.prototype.collectImages = function CollectImages() {
   var deferred = q.defer();
-  var _this = this;
   var paths = this.paths;
   var options = this.options;
   var localPaths = [];
 
   // create temp directory
-  mkdirp.sync(options.temp);
-  log.info('temp directory created');
+  mkdirp.sync(path.resolve(options.temp, 'resized'));
+  mkdirp.sync(path.resolve(options.temp, 'frames'));
+  log.info('temp directories created');
 
   _.forEach(paths, function(filepath, i) {
-    var requestOptions = null;
     var filename = _.last(filepath.split('/'));
     var localPath = path.resolve(options.temp, filename);
     var ws = fs.createWriteStream(localPath)
@@ -137,7 +141,6 @@ ImageToConsole.prototype.collectImages = function CollectImages() {
  * @return {Promise}          resolves with array of image buffers
  */
 ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
-
   var deferred = q.defer();
   var bufferPrep = [];
 
@@ -151,7 +154,7 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
         deferred.reject(err);
       }
 
-      log.info('file read success: '+localPath);
+      log.info('file read success: ' + localPath);
       _readFileCallback(imageBuffer, localPath, i);
     });
 
@@ -171,9 +174,10 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
       if (err) {
         log.error('"readimage" error: ' + JSON.stringify(err));
         deferred.reject(err);
+        return false;
       }
 
-      log.info('"readimage" success: '+localPath);
+      log.info('"readimage" success: ' + localPath);
       _readImageCallback(imageData, localPath, i);
     });
   }
@@ -185,27 +189,35 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
    * @param  {Number} i           index of image
    */
   function _readImageCallback(imageData, localPath, i) {
-    console.log(imageData);
     var frames = imageData.frames;
     var myBuffers = [];
     var frame = frames[0];
 
-    if(frame.delay) {
-      log.info('native animation speed is "'+frame.delay+'" for "'+localPath+'"');
+    if (frame.delay) {
+      log.info('native animation speed is "' + frame.delay + '" for "' + localPath + '"');
     }
 
     // if animated gif, there will be multiple frames
-    if(frames.length > 1){
-      _.forEach(frames, function(frame){
-        myBuffers.push(frame.data);
+    if (frames.length > 1) {
+      _.forEach(frames, function(frame) {
+        myBuffers.push({
+          w: imageData.width,
+          h: imageData.height,
+          d: frame.data
+        });
       });
     } else {
-      myBuffers.push(frame.data);
+      myBuffers.push({
+        w: imageData.width,
+        h: imageData.height,
+        d: frame.data
+      });
     }
 
     bufferPrep[i] = myBuffers;
 
-    if(_.compact(bufferPrep).length === localPaths.length){
+    if (_.compact(bufferPrep).length === localPaths.length) {
+      log.info('images successfully converted to rgba buffers');
       deferred.resolve(_.flatten(bufferPrep));
     }
 
@@ -220,8 +232,96 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
  * @param  {Array} bufferArr array of image buffers
  * @return {Promise}         resolves with array of resized buffers
  */
-ImageToConsole.prototype.resizeImages = function ResizeImages(bufferArr){
-  console.log(bufferArr);
+ImageToConsole.prototype.resizeImages = function(bufferArr) {
+
+  var deferred = q.defer();
+  var resizedPaths = [];
+  var _this = this;
+
+  _.forEach(bufferArr, function(rgbaBuffer, i) {
+    var png = new PNG();
+    var readPath = path.resolve(__dirname, 'blank.png');
+    var read = fs.createReadStream(readPath);
+    var writePath = path.resolve(_this.options.temp, 'frames', i + '-frame.png');
+    var write = fs.createWriteStream(writePath);
+
+    read.pipe(png)
+      .on('error', function(err) {
+        log.error('png pipe error: ' + JSON.stringify(err));
+      })
+      .on('parsed', function() {
+        this.data = rgbaBuffer.d;
+        this.width = rgbaBuffer.w;
+        this.height = rgbaBuffer.h;
+
+        this.pack().pipe(write)
+          .on('error', function(err) {
+            log.error('pack pipe error: ' + JSON.stringify(err));
+            deferred.reject(err);
+          })
+          .on('finish', function() {
+            _resize(writePath, i);
+          });
+      });
+  });
+
+  /**
+   * called upon frame write success
+   * @param  {String} framePath path to frame image file
+   * @param  {Number} index     index in array
+   */
+  function _resize(framePath, index) {
+    var resizedPath = path.resolve(_this.options.temp, 'resized', index + '-resized.png');
+
+    Jimp.read(framePath, function(err, frame) {
+      if (err) {
+        log.error('Jimp read error: ' + JSON.stringify(err));
+        deferred.reject(err);
+        return false;
+      }
+
+      frame
+        .resize(_this.options.width, _this.options.height || Jimp.AUTO)
+        .write(resizedPath);
+
+      resizedPaths[index] = resizedPath;
+
+      if (_.compact(resizedPaths).length === bufferArr.length) {
+        log.info('images successfully resized');
+        deferred.resolve(resizedPaths);
+      }
+
+    });
+  }
+
+  return deferred.promise;
 };
+
+/**
+ * generates ascii strings
+ * @param  {Array} resizedPaths paths of resized images
+ * @return {Promise}              
+ */
+ImageToConsole.prototype.generateAscii = function GenerateAscii(resizedPaths) {
+  log.info('Generating Ascii');
+  var deferred = q.defer();
+  var asciiStrings = [];
+  var _this = this;
+
+  _.forEach(resizedPaths, function(resizedPath, index) {
+    ai(resizedPath, function(ascii) {
+      asciiStrings[index] = ascii;
+
+      if (_.compact(asciiStrings).length === resizedPaths.length) {
+        log.info('ascii successfully created');
+        _this.queue = asciiStrings;
+        deferred.resolve(asciiStrings);
+      }
+    });
+  });
+
+  return deferred.promise;
+};
+
 
 module.exports = ImageToConsole;
