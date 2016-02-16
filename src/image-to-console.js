@@ -13,6 +13,7 @@ var Jimp = require('jimp');
 var PNG = require('pngjs2').PNG;
 var readimage = require('readimage');
 var ai = require('ascii-images');
+var logUpdate = require('log-update');
 
 /**
  * ImageToConsole constructor function
@@ -29,6 +30,11 @@ function ImageToConsole(imgPaths, options, debug) {
   this.paths = imgPaths;
   this.options = _.extend({}, defaults, options);
   this.queue = [];
+  this.interval = null;
+
+  if(options.speed){
+    this.userSetSpeed = true;
+  }
 
   // create logger with options from user
   log = new Logger(this.options);
@@ -143,6 +149,7 @@ ImageToConsole.prototype.collectImages = function CollectImages() {
 ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
   var deferred = q.defer();
   var bufferPrep = [];
+  var _this = this;
 
   _.forEach(localPaths, function(localPath, i) {
 
@@ -195,6 +202,11 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
 
     if (frame.delay) {
       log.info('native animation speed is "' + frame.delay + '" for "' + localPath + '"');
+
+      if(!_this.userSetSpeed){
+        log.warn('setting speed to '+ frame.delay);
+        _this.options.speed = frame.delay;
+      }
     }
 
     // if animated gif, there will be multiple frames
@@ -217,7 +229,7 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
     bufferPrep[i] = myBuffers;
 
     if (_.compact(bufferPrep).length === localPaths.length) {
-      log.info('images successfully converted to rgba buffers');
+      log.success('images successfully converted to rgba buffers');
       deferred.resolve(_.flatten(bufferPrep));
     }
 
@@ -287,7 +299,7 @@ ImageToConsole.prototype.resizeImages = function(bufferArr) {
       resizedPaths[index] = resizedPath;
 
       if (_.compact(resizedPaths).length === bufferArr.length) {
-        log.info('images successfully resized');
+        log.success('all images successfully resized');
         deferred.resolve(resizedPaths);
       }
 
@@ -300,7 +312,7 @@ ImageToConsole.prototype.resizeImages = function(bufferArr) {
 /**
  * generates ascii strings
  * @param  {Array} resizedPaths paths of resized images
- * @return {Promise}              
+ * @return {Promise}
  */
 ImageToConsole.prototype.generateAscii = function GenerateAscii(resizedPaths) {
   log.info('Generating Ascii');
@@ -313,7 +325,7 @@ ImageToConsole.prototype.generateAscii = function GenerateAscii(resizedPaths) {
       asciiStrings[index] = ascii;
 
       if (_.compact(asciiStrings).length === resizedPaths.length) {
-        log.info('ascii successfully created');
+        log.success('ascii successfully created');
         _this.queue = asciiStrings;
         deferred.resolve(asciiStrings);
       }
@@ -321,6 +333,24 @@ ImageToConsole.prototype.generateAscii = function GenerateAscii(resizedPaths) {
   });
 
   return deferred.promise;
+};
+
+ImageToConsole.prototype.startAnimation = function(frames) {
+  log.info('starting animation');
+
+  function _getFrame() {
+    var i = 0;
+    var len = frames.length;
+
+    return function() {
+      return frames[i = ++i % len];
+    };
+  }
+
+  this.interval = setInterval(function() {
+    logUpdate(_getFrame());
+  }, this.options.speed);
+
 };
 
 

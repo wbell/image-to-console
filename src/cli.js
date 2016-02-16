@@ -16,6 +16,6 @@ program
   .option('-l, --loop [loop]', 'loop infinitely or specify number of times to loop through the images (automatically enables cycle)', parseInt)
   .option('-s, --speed <speed>', 'cycle speed, in milliseconds', parseInt)
   .option('-S, --shuffle', 'shuffle the image order')
-  .option('-L, --log <log>', 'log verbosity, default: 0 (errors only); 1 (errors, warnings, successes); 2 (errors, warnings, successes, info)', parseInt)
+  .option('-L, --log <log>', 'log verbosity, default: 0 (errors only); 1 (also warnings and successes); 2 (also info)', parseInt)
   .action(itc)
   .parse(process.argv);

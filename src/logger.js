@@ -4,7 +4,7 @@ var chalk = require('chalk');
 var prefix = '[itc]';
 
 function Logger(options){
-  this.logLevel = options.log;
+  this.logLevel = options.log || 0;
 }
 
 Logger.prototype.info = function Log(msg) {
