@@ -2,10 +2,12 @@
   "width": 40,
   "height": null,
   "index": 0,
-  "cycle": false,
-  "loop": false,
-  "speed": 400,
+  "cycle": true,
+  "loop": true,
+  "speed": 100,
   "shuffle": false,
   "temp": "./itc_temp",
-  "log": 0
+  "log": 0,
+  "cleanup": true,
+  "debug": false
 }

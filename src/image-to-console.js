@@ -15,6 +15,7 @@ var PNG = require('pngjs2').PNG;
 var readimage = require('readimage');
 var ai = require('ascii-images');
 var logUpdate = require('log-update');
+var glob = require('glob');
 
 /**
  * ImageToConsole constructor function
@@ -22,9 +23,9 @@ var logUpdate = require('log-update');
  * @param {Object} options  options map passed to plugin
  * @return {Promise}
  */
-function ImageToConsole(imgPaths, options, debug) {
+function ImageToConsole(imgPaths, options) {
   if (!(this instanceof ImageToConsole)) {
-    return new ImageToConsole(imgPaths, options, debug);
+    return new ImageToConsole(imgPaths, options);
   }
 
   // set properties
@@ -32,7 +33,6 @@ function ImageToConsole(imgPaths, options, debug) {
   this.options = _.extend({}, defaults, options);
   this.queue = [];
   this.interval = null;
-  this.debug = !!debug;
 
   if (options.speed) {
     this.userSetSpeed = true;
@@ -43,9 +43,10 @@ function ImageToConsole(imgPaths, options, debug) {
 
   log.info('ImageToConsole instance constructed');
 
-  if (debug) return this;
+  if (this.options.debug) return this;
 
-  return this.collectImages()
+  return this.cleanUp(true)
+    .then(this.collectImages.bind(this))
     .then(this.bufferImages.bind(this))
     .then(this.resizeImages.bind(this))
     .then(this.generateAscii.bind(this))
@@ -62,6 +63,17 @@ ImageToConsole.prototype.collectImages = function CollectImages() {
   var paths = this.paths;
   var options = this.options;
   var localPaths = [];
+
+  // check for globs
+  _.forEach(paths, function(iPath, i) {
+    if (iPath.indexOf('*') !== -1) {
+      paths[i] = glob.sync(iPath);
+    }
+  });
+
+  paths = _.sortBy(_.flatten(paths), function(a, b) {
+    return a < b;
+  });
 
   // create temp directory
   mkdirp.sync(path.resolve(options.temp, 'resized'));
@@ -163,10 +175,10 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
       if (err) {
         log.error('file read error: ' + JSON.stringify(err));
         deferred.reject(err);
+      } else {
+        log.info('file read success: ' + localPath);
+        _readFileCallback(imageBuffer, localPath, i);
       }
-
-      log.info('file read success: ' + localPath);
-      _readFileCallback(imageBuffer, localPath, i);
     });
 
   });
@@ -185,11 +197,10 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
       if (err) {
         log.error('"readimage" error: ' + JSON.stringify(err));
         deferred.reject(err);
-        return false;
+      } else {
+        log.info('"readimage" success: ' + localPath);
+        _readImageCallback(imageData, localPath, i);
       }
-
-      log.info('"readimage" success: ' + localPath);
-      _readImageCallback(imageData, localPath, i);
     });
   }
 
@@ -215,12 +226,14 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
 
     // if animated gif, there will be multiple frames
     if (frames.length > 1) {
-      _.forEach(frames, function(frame) {
+      _.forEach(frames, function(frame, ind) {
         myBuffers.push({
           w: imageData.width,
           h: imageData.height,
           d: frame.data
         });
+
+        log.info('buffer for image:' + i + ' frame:' + ind + ' stored');
       });
     } else {
       myBuffers.push({
@@ -228,6 +241,8 @@ ImageToConsole.prototype.bufferImages = function BufferImages(localPaths) {
         h: imageData.height,
         d: frame.data
       });
+
+      log.info('buffer for image:' + i + ' frame:0 stored');
     }
 
     bufferPrep[i] = myBuffers;
@@ -258,12 +273,17 @@ ImageToConsole.prototype.resizeImages = function(bufferArr) {
     var png = new PNG();
     var readPath = path.resolve(__dirname, 'blank.png');
     var read = fs.createReadStream(readPath);
-    var writePath = path.resolve(_this.options.temp, 'frames', i + '-frame.png');
+    var writePath = path.resolve(
+      _this.options.temp,
+      'frames',
+      i + '-frame.png'
+    );
     var write = fs.createWriteStream(writePath);
 
     read.pipe(png)
       .on('error', function(err) {
         log.error('png pipe error: ' + JSON.stringify(err));
+        deferred.reject(err);
       })
       .on('parsed', function() {
         this.data = rgbaBuffer.d;
@@ -287,7 +307,11 @@ ImageToConsole.prototype.resizeImages = function(bufferArr) {
    * @param  {Number} index     index in array
    */
   function _resize(framePath, index) {
-    var resizedPath = path.resolve(_this.options.temp, 'resized', index + '-resized.png');
+    var resizedPath = path.resolve(
+      _this.options.temp,
+      'resized',
+      index + '-resized.png'
+    );
 
     Jimp.read(framePath, function(err, frame) {
       if (err) {
@@ -296,16 +320,15 @@ ImageToConsole.prototype.resizeImages = function(bufferArr) {
         return false;
       }
 
-
       frame
         .resize(_this.options.width, _this.options.height || Jimp.AUTO)
         .write(resizedPath, function(err) {
           if (err) {
-            log.error('write error: ' + resizedPath);
+            log.error('resized image write error: ' + resizedPath);
             log.error(err);
             deferred.reject(err);
           } else {
-            log.info('successful write: ' + resizedPath);
+            log.info('successful resized image write: ' + resizedPath);
 
             resizedPaths[index] = resizedPath;
 
@@ -402,14 +425,24 @@ ImageToConsole.prototype.stopAnimation = function StopAnimation(clear) {
   log.info('animation stopped');
 };
 
-ImageToConsole.prototype.cleanUp = function CleanUp() {
-  rimraf(path.resolve(this.options.temp), function(err) {
-    if (err) {
-      log.error(err);
-    } else {
-      log.success('temp directories cleared');
-    }
-  });
+ImageToConsole.prototype.cleanUp = function CleanUp(force) {
+  var deferred = q.defer();
+
+  if (force === true || this.options.cleanup) {
+    rimraf(path.resolve(this.options.temp), function(err) {
+      if (err) {
+        log.error(err);
+        deferred.reject(err);
+      } else {
+        log.success('temp directories cleared');
+        deferred.resolve(true);
+      }
+    });
+  } else {
+    deferred.reject(false);
+  }
+
+  return deferred.promise;
 };
 
 
